@@ -322,7 +322,7 @@ function chunks(text) {
 
 /* Play steps. pos is the ayah index; the as Saadi group sits at (last ayah index + 0.5). */
 const ORDER = { rec: 0, en: 1, ur: 2, ten: 3, tur: 4 };
-const PART_NAME = { rec: "Recitation, Mishary Alafasy", en: "English translation, Ibrahim Walk", ur: "Urdu audio, Shamshad Ali Khan", ten: "English tafsir, Al Mukhtasar (device voice)", tur: "Urdu tafsir, as Saadi (device voice)" };
+const PART_NAME = { rec: "Recitation, Mishary Alafasy", en: "English translation, Ibrahim Walk", ur: "Urdu audio, Shamshad Ali Khan (Jalandhry translation)", ten: "English tafsir, Al Mukhtasar (device voice)", tur: "Urdu tafsir, as Saadi (device voice)" };
 function ayahSteps(s, i) {
   const a = s.ayat[i], f = fname(s.surah, a.ayah), p = S.q.parts, out = [];
   if (p.rec) out.push({ pos: i, kind: "rec", src: "audio/recitation/" + f, key: a.key });
@@ -582,12 +582,12 @@ function quranHTML() {
     <div class="sets">
       ${swHTML("rec", "Recitation", p.rec)}
       ${swHTML("en", "English translation", p.en)}
-      ${swHTML("ur", "Urdu audio", p.ur, false, "Translation not yet confirmed")}
+      ${swHTML("ur", "Urdu audio", p.ur, false, "Reads Jalandhry, not Junagarhi")}
       ${swHTML("ten", "English tafsir", p.ten, !VOICES.en, VOICES.en ? "Device voice" : (noVoice || "No English voice found"))}
       ${swHTML("tur", "Urdu tafsir", p.tur, !VOICES.ur, VOICES.ur ? "Device voice" : (noVoice || "No Urdu voice on this device"))}
     </div>
     ${VOICES.has && !VOICES.ur ? `<p class="note">This device has no Urdu voice, so the Urdu tafsir cannot be read aloud. It is still shown on screen. A Hindi voice is never used in its place.</p>` : ""}
-    <p class="note">The Urdu audio on EveryAyah (Shamshad Ali Khan) has not yet been checked against the Junagarhi text shown below, so it is off by default and is not labelled as Junagarhi.</p>
+    <p class="note">The Urdu audio (Shamshad Ali Khan, from EveryAyah) reads the translation of Fateh Muhammad Jalandhry, not the Junagarhi text shown below. Checked by listening on 20 November 2026. It is off by default.</p>
   </section>`;
   const groups = s.tafsir_ur_saadi_groups || [];
   const cards = s.ayat.map((a, i) => {
@@ -614,7 +614,7 @@ function quranHTML() {
     <li>Arabic: King Fahd Glorious Quran Printing Complex, Hafs data v18 (github.com/ibnhazm/KFGQPC).</li>
     <li>Saheeh International (older edition) and Muhammad Junagarhi: github.com/fawazahmed0/quran-api.</li>
     <li>Al Mukhtasar (English) and Tafsir as Saadi (Urdu): github.com/spa5k/tafsir_api.</li>
-    <li>Audio: everyayah.com. Recitation by Mishary Alafasy. English by Ibrahim Walk. Urdu by Shamshad Ali Khan.</li>
+    <li>Audio: everyayah.com. Recitation by Mishary Alafasy. English by Ibrahim Walk. Urdu by Shamshad Ali Khan, reading the translation of Fateh Muhammad Jalandhry.</li>
     <li>Tafsir is read by this device's own voice, because no human recording exists. Arabic parts of the tafsir stay on screen and are not read aloud.</li>
   </ul></section>`;
   return head + cards + src;
