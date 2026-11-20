@@ -91,7 +91,7 @@ button:focus-visible, a:focus-visible, input:focus-visible + span { outline: 3px
 .part + .part { border-top: 1px dashed var(--line); padding-top: 10px; }
 .lab { font-size: .75rem; letter-spacing: .04em; color: var(--muted); font-weight: 700; }
 .ur { font-family: var(--f-ur); direction: rtl; unicode-bidi: isolate; font-size: 1.2rem; line-height: 2.5; text-align: right; }
-.saadi .ur { white-space: pre-line; font-size: 1.1rem; }
+.saadi .ur { white-space: pre-line; font-size: 1.1rem; -webkit-user-select: text; user-select: text; }
 .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .sw { display: flex; align-items: center; gap: 10px; border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; min-height: 52px; font-weight: 700; font-size: .95rem; background: var(--card); }
 .sw input { width: 24px; height: 24px; accent-color: var(--green); flex: none; margin: 0; }
@@ -603,6 +603,7 @@ function quranHTML() {
     const saadi = q.showUr ? groups.filter(g => g.to === a.ayah).map(g => `<article class="card qa saadi" id="qs-${i}">
       <div class="hhead"><span class="ref"><a href="${qlink(s.surah, g.from, g.to)}" target="_blank" rel="noopener">Quran ${s.surah}:${g.from} to ${s.surah}:${g.to}</a></span>
         ${VOICES.ur ? `<button class="btn big" data-play-saadi="${g.to}">Play Urdu tafsir</button>` : ""}</div>
+      <button class="btn big" data-copy-saadi="${g.to}">Copy Urdu tafsir</button>
       <div class="lab">Urdu tafsir: Tafsir as Saadi (Urdu), covering ayat ${g.from} to ${g.to}</div>
       <div class="ur" lang="ur">${esc(g.text)}</div>
     </article>`).join("") : "";
@@ -626,7 +627,24 @@ function bindQuran(v) {
   const ps = $("#playSurah", v); if (ps) ps.onclick = () => { unlock(); start(surahSteps(curSurah()), "surah"); };
   v.querySelectorAll("[data-play-ayah]").forEach(b => b.onclick = () => { unlock(); start(ayahSteps(curSurah(), +b.dataset.playAyah), "ayah"); });
   v.querySelectorAll("[data-play-saadi]").forEach(b => b.onclick = () => { const s = curSurah(); const g = s.tafsir_ur_saadi_groups.find(x => x.to === +b.dataset.playSaadi); unlock(); start([saadiStep(s, g)], "saadi"); });
+  v.querySelectorAll("[data-copy-saadi]").forEach(b => b.onclick = () => {
+    const s = curSurah(); const g = s.tafsir_ur_saadi_groups.find(x => x.to === +b.dataset.copySaadi);
+    // The stored text exactly, with its source and reference on the first line.
+    copyText(`Tafsir as Saadi (Urdu), Quran ${s.surah}:${g.from} to ${s.surah}:${g.to}\n\n${g.text}`);
+  });
   if (P.playing) showNow(P.steps[P.i], false);
+}
+function copyText(t) {
+  const fallback = () => {
+    const ta = document.createElement("textarea");
+    ta.value = t; ta.setAttribute("readonly", ""); ta.style.position = "fixed"; ta.style.top = "0"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.focus(); ta.select(); ta.setSelectionRange(0, t.length);
+    let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+    ta.remove();
+    toast(ok ? "Copied." : "Could not copy. Press and hold the text to select it instead.");
+  };
+  try { if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(t).then(() => toast("Copied."), fallback); return; } } catch (e) {}
+  fallback();
 }
 
 function render() {
