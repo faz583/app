@@ -77,14 +77,14 @@ button:focus-visible, a:focus-visible, input:focus-visible + span { outline: 3px
 [hidden] { display: none !important; }
 
 /* ---------- Quran tab ---------- */
-.surahs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.surahs { display: grid; grid-template-columns: repeat(auto-fit, minmax(100px, 1fr)); gap: 8px; }
 .surahs button { border: 1px solid var(--line); background: var(--card); border-radius: 12px; padding: 10px; display: flex; flex-direction: column; align-items: center; gap: 0; min-height: 64px; }
 .surahs button[aria-pressed="true"] { border: 2px solid var(--green); background: var(--green-soft); }
 .surahs .ar { font-family: var(--f-ar); font-size: 1.4rem; line-height: 1.6; direction: rtl; }
 .surahs .en { font-size: .85rem; font-weight: 700; }
 .qhead { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
 .qhead .ar { font-family: var(--f-ar); font-size: 1.8rem; direction: rtl; }
-.qa { gap: 10px; }
+.qa { gap: 10px; content-visibility: auto; contain-intrinsic-size: auto 900px; }
 .qa.now { border: 2px solid var(--gold); box-shadow: 0 0 0 3px var(--gold-soft); }
 .qa .q-ar { font-size: 2rem; line-height: 2.3; }
 .part { display: flex; flex-direction: column; gap: 2px; }
@@ -137,7 +137,7 @@ const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;
 const PER_DAY = 4;
 
 /* ---------- state: kept on this device in localStorage ---------- */
-const DEFAULT_Q = { surah: 1, showEn: true, showUr: true, parts: { rec: true, en: true, ur: false, ten: true, tur: true } };
+const DEFAULT_Q = { v: 2, surah: 1, showEn: true, showUr: true, parts: { rec: true, en: true, ur: true, ten: true, tur: true } };
 const DEFAULT_STATE = { saved: [], read: [], arabic: true, sets: {}, q: DEFAULT_Q };
 let S = JSON.parse(JSON.stringify(DEFAULT_STATE));
 function lsGet() { try { return JSON.parse(localStorage.getItem("daily-hadith-state") || "null"); } catch (e) { return null; } }
@@ -148,6 +148,8 @@ function initStore() {
   if (local && typeof local === "object") S = Object.assign(S, local);
   const q = Object.assign({}, DEFAULT_Q, S.q || {});
   q.parts = Object.assign({}, DEFAULT_Q.parts, (S.q && S.q.parts) || {});
+  // Version 2: the Urdu audio now reads Junagarhi, so switch it on once for devices that saved the old "off".
+  if (!S.q || !S.q.v || S.q.v < 2) { q.parts.ur = true; q.v = 2; }
   S.q = q;
   if (!Array.isArray(S.saved)) S.saved = [];
   if (!Array.isArray(S.read)) S.read = [];
@@ -262,7 +264,12 @@ function savedHTML() {
 let QD = null, qErr = "";
 async function loadQuran() {
   if (QD) return;
-  try { QD = await getJSON("quran.json"); qErr = ""; }
+  // quran.json holds the tested data for al Fatihah and al Ikhlas exactly as checked; each added surah has its own file.
+  try {
+    const files = await Promise.all(["quran.json", "quran-002.json"].map(getJSON));
+    QD = { surahs: files.flatMap(f => f.surahs).sort((a, b) => a.surah - b.surah) };
+    qErr = "";
+  }
   catch (e) { qErr = "The Quran data could not be loaded. Check your connection, then tap Try again."; }
   if (view === "quran") render();
 }
@@ -322,13 +329,13 @@ function chunks(text) {
 
 /* Play steps. pos is the ayah index; the as Saadi group sits at (last ayah index + 0.5). */
 const ORDER = { rec: 0, en: 1, ur: 2, ten: 3, tur: 4 };
-const PART_NAME = { rec: "Recitation, Mishary Alafasy", en: "English translation, Ibrahim Walk", ur: "Urdu audio, Shamshad Ali Khan (Jalandhry translation)", ten: "English tafsir, Al Mukhtasar (device voice)", tur: "Urdu tafsir, as Saadi (device voice)" };
+const PART_NAME = { rec: "Recitation, Mishary Alafasy", en: "English translation, Ibrahim Walk", ur: "Urdu translation, Muhammad Junagarhi", ten: "English tafsir, Al Mukhtasar (device voice)", tur: "Urdu tafsir, as Saadi (device voice)" };
 function ayahSteps(s, i) {
   const a = s.ayat[i], f = fname(s.surah, a.ayah), p = S.q.parts, out = [];
   if (p.rec) out.push({ pos: i, kind: "rec", src: "audio/recitation/" + f, key: a.key });
   if (p.en) out.push({ pos: i, kind: "en", src: "audio/english/" + f, key: a.key });
   if (p.ur) out.push({ pos: i, kind: "ur", src: "audio/urdu/" + f, key: a.key });
-  if (p.ten && VOICES.en) out.push({ pos: i, kind: "ten", text: a.tafsir_en_mukhtasar, lang: "en", key: a.key });
+  if (p.ten && VOICES.en && a.tafsir_en_mukhtasar) out.push({ pos: i, kind: "ten", text: a.tafsir_en_mukhtasar, lang: "en", key: a.key });
   return out;
 }
 function saadiStep(s, g) {
@@ -566,7 +573,7 @@ function quranHTML() {
   const s = curSurah(), q = S.q, p = q.parts;
   const noVoice = !VOICES.has ? "No device voice in this browser." : "";
   const head = `<section class="card hero">
-    <div class="eyebrow">Quran, test version: two surahs</div>
+    <div class="eyebrow">Quran, test version: ${QD.surahs.length} surahs</div>
     <div class="surahs">${QD.surahs.map(x => `<button data-surah="${x.surah}" aria-pressed="${x.surah === s.surah}"><span class="ar" lang="ar">${esc(x.name_ar)}</span><span class="en">${x.surah}. ${esc(x.name_en)}</span></button>`).join("")}</div>
     <div class="qhead"><h1>${esc(s.name_en)}</h1><span class="ar" lang="ar">${esc(s.name_ar)}</span></div>
     <div class="note">Surah ${s.surah}, ${s.ayat.length} ayat.</div>
@@ -582,23 +589,24 @@ function quranHTML() {
     <div class="sets">
       ${swHTML("rec", "Recitation", p.rec)}
       ${swHTML("en", "English translation", p.en)}
-      ${swHTML("ur", "Urdu audio", p.ur, false, "Reads Jalandhry, not Junagarhi")}
+      ${swHTML("ur", "Urdu translation", p.ur, false, "Junagarhi audio")}
       ${swHTML("ten", "English tafsir", p.ten, !VOICES.en, VOICES.en ? "Device voice" : (noVoice || "No English voice found"))}
       ${swHTML("tur", "Urdu tafsir", p.tur, !VOICES.ur, VOICES.ur ? "Device voice" : (noVoice || "No Urdu voice on this device"))}
     </div>
     ${VOICES.has && !VOICES.ur ? `<p class="note">This device has no Urdu voice, so the Urdu tafsir cannot be read aloud. It is still shown on screen. A Hindi voice is never used in its place.</p>` : ""}
-    <p class="note">The Urdu audio (Shamshad Ali Khan, from EveryAyah) reads the translation of Fateh Muhammad Jalandhry, not the Junagarhi text shown below. Checked by listening on 20 November 2026. It is off by default.</p>
+    <p class="note">The Urdu translation audio reads the Junagarhi text shown below. Checked by listening for al Fatihah and al Ikhlas on 20 November 2026.</p>
   </section>`;
   const groups = s.tafsir_ur_saadi_groups || [];
   const cards = s.ayat.map((a, i) => {
     const ayahCard = `<article class="card qa" id="qa-${i}">
       <div class="hhead"><span class="ref"><a href="${qlink(s.surah, a.ayah)}" target="_blank" rel="noopener">Quran ${esc(a.key)}</a></span>
-        <button class="btn big" data-play-ayah="${i}">Play this ayah</button></div>
+        <span class="row"><button class="btn big" data-play-ayah="${i}">Play this ayah</button>
+        <button class="btn big" data-play-from="${i}">Play from here</button></span></div>
       <div class="part"><div class="q-ar" lang="ar">${esc(a.arabic)}</div>
         <div class="lab">Arabic: King Fahd Glorious Quran Printing Complex, Hafs</div></div>
       ${q.showEn ? `<div class="part"><div class="lab">English translation: Saheeh International</div><div lang="en">${esc(a.en_saheeh)}</div></div>` : ""}
       ${q.showUr ? `<div class="part"><div class="lab">Urdu translation: Muhammad Junagarhi</div><div class="ur" lang="ur">${esc(a.ur_junagarhi)}</div></div>` : ""}
-      ${q.showEn ? `<div class="part"><div class="lab">English tafsir: Al Mukhtasar (Tafsir Center for Quranic Studies)</div><div lang="en">${esc(a.tafsir_en_mukhtasar)}</div></div>` : ""}
+      ${q.showEn ? `<div class="part"><div class="lab">English tafsir: Al Mukhtasar (Tafsir Center for Quranic Studies)</div>${a.tafsir_en_mukhtasar ? `<div lang="en">${esc(a.tafsir_en_mukhtasar)}</div>` : `<div class="note">The source has no Al Mukhtasar text for this ayah.</div>`}</div>` : ""}
     </article>`;
     const saadi = q.showUr ? groups.filter(g => g.to === a.ayah).map(g => `<article class="card qa saadi" id="qs-${i}">
       <div class="hhead"><span class="ref"><a href="${qlink(s.surah, g.from, g.to)}" target="_blank" rel="noopener">Quran ${s.surah}:${g.from} to ${s.surah}:${g.to}</a></span>
@@ -614,7 +622,7 @@ function quranHTML() {
     <li>Arabic: King Fahd Glorious Quran Printing Complex, Hafs data v18 (github.com/ibnhazm/KFGQPC).</li>
     <li>Saheeh International (older edition) and Muhammad Junagarhi: github.com/fawazahmed0/quran-api.</li>
     <li>Al Mukhtasar (English) and Tafsir as Saadi (Urdu): github.com/spa5k/tafsir_api.</li>
-    <li>Audio: everyayah.com. Recitation by Mishary Alafasy. English by Ibrahim Walk. Urdu by Shamshad Ali Khan, reading the translation of Fateh Muhammad Jalandhry.</li>
+    <li>Audio: recitation by Mishary Alafasy and English by Ibrahim Walk, from everyayah.com. Urdu translation audio of Muhammad Junagarhi, ayah by ayah, from the Internet Archive item "audio-muhammad-junagarhi" (described there as from the King Fahd Complex; not confirmed).</li>
     <li>Tafsir is read by this device's own voice, because no human recording exists. Arabic parts of the tafsir stay on screen and are not read aloud.</li>
   </ul></section>`;
   return head + cards + src;
@@ -625,6 +633,7 @@ function bindQuran(v) {
   v.querySelectorAll("[data-qshow]").forEach(c => c.onchange = () => { S.q[c.dataset.qshow] = c.checked; save(); render(); });
   v.querySelectorAll("[data-qpart]").forEach(c => c.onchange = () => { S.q.parts[c.dataset.qpart] = c.checked; save(); rebuildWhilePlaying(); });
   const ps = $("#playSurah", v); if (ps) ps.onclick = () => { unlock(); start(surahSteps(curSurah()), "surah"); };
+  v.querySelectorAll("[data-play-from]").forEach(b => b.onclick = () => { const i = +b.dataset.playFrom; unlock(); start(surahSteps(curSurah()).filter(x => x.pos >= i), "surah"); });
   v.querySelectorAll("[data-play-ayah]").forEach(b => b.onclick = () => { unlock(); start(ayahSteps(curSurah(), +b.dataset.playAyah), "ayah"); });
   v.querySelectorAll("[data-play-saadi]").forEach(b => b.onclick = () => { const s = curSurah(); const g = s.tafsir_ur_saadi_groups.find(x => x.to === +b.dataset.playSaadi); unlock(); start([saadiStep(s, g)], "saadi"); });
   v.querySelectorAll("[data-copy-saadi]").forEach(b => b.onclick = () => {
