@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Voice test</title>
+<style>
+:root{--bg:#f5f3ec;--card:#fff;--ink:#1c2b26;--muted:#5c6b65;--line:#dcd9cc;--green:#1f5c4a;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#111a17;--card:#18241f;--ink:#ecefe9;--muted:#a3b0aa;--line:#2b3a34;--green:#7fcfb1;color-scheme:dark}}
+body{margin:0;background:var(--bg);color:var(--ink);font:17px/1.5 system-ui,sans-serif}
+.w{max-width:640px;margin:0 auto;padding:16px}
+button{display:block;width:100%;min-height:56px;margin:8px 0;border-radius:12px;border:1px solid var(--green);background:var(--green);color:var(--bg);font:inherit;font-weight:700}
+pre{white-space:pre-wrap;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px;font-size:14px}
+h1{font-size:1.4rem}
+</style></head><body><div class="w">
+<h1>Voice test</h1>
+<p>Turn the volume up. Tap each test button in order and wait a few seconds after each one. Then take a screenshot of the whole page (or two screenshots) and send it to Claude.</p>
+<button id="t1">Test 1: device voice, default setting</button>
+<button id="t2">Test 2: device voice, the English voice the app picks</button>
+<button id="t3">Test 3: play a short recitation clip, then the voice (like the app)</button>
+<button id="t4">Test 4: Urdu voice</button>
+<h2>Results</h2>
+<pre id="log"></pre>
+<h2>This device</h2>
+<pre id="info"></pre>
+</div>
+<script>
+const log = (m) => { const l = document.getElementById("log"); l.textContent += new Date().toLocaleTimeString() + "  " + m + "\n"; };
+const has = "speechSynthesis" in window;
+let voices = [];
+function load() { try { voices = speechSynthesis.getVoices() || []; } catch (e) { voices = []; } info(); }
+function pickEn() {
+  const en = voices.filter(v => /^en([-_]|$)/i.test(v.lang));
+  const rank = v => (/^en[-_](NZ|AU|GB)/i.test(v.lang) ? 0 : /^en[-_]US/i.test(v.lang) ? 1 : 2) + (v.localService ? 0 : 3);
+  return en.sort((a, b) => rank(a) - rank(b))[0] || null;
+}
+const pickUr = () => voices.find(v => /^ur([-_]|$)/i.test(v.lang)) || null;
+function info() {
+  const en = voices.filter(v => /^en/i.test(v.lang)), ur = voices.filter(v => /^ur/i.test(v.lang)), hi = voices.filter(v => /^hi/i.test(v.lang));
+  const p = pickEn();
+  document.getElementById("info").textContent =
+    "Browser: " + navigator.userAgent + "\n" +
+    "Opened from Home Screen: " + (navigator.standalone === true || matchMedia("(display-mode: standalone)").matches) + "\n" +
+    "Device voice available: " + has + "\n" +
+    "audioSession: " + ("audioSession" in navigator ? navigator.audioSession.type : "not available") + "\n" +
+    "Voices: " + voices.length + " in total, " + en.length + " English, " + ur.length + " Urdu, " + hi.length + " Hindi\n" +
+    "App English pick: " + (p ? p.name + " (" + p.lang + ", " + (p.localService ? "on device" : "online") + ")" : "none") + "\n" +
+    "Urdu voices: " + (ur.length ? ur.map(v => v.name + " (" + v.lang + ")").join(", ") : "none") + "\n" +
+    "English voices: " + en.slice(0, 15).map(v => v.name + " " + v.lang).join("; ");
+}
+let keep = [];
+function say(label, text, voice, lang) {
+  if (!has) { log(label + ": no device voice in this browser"); return; }
+  const u = new SpeechSynthesisUtterance(text);
+  if (voice) { u.voice = voice; u.lang = voice.lang; } else if (lang) { u.lang = lang; }
+  let started = false;
+  u.onstart = () => { started = true; log(label + ": started"); };
+  u.onend = () => log(label + ": ended");
+  u.onerror = (e) => log(label + ": error " + (e.error || "unknown"));
+  keep.push(u);
+  try { speechSynthesis.cancel(); speechSynthesis.resume(); } catch (e) {}
+  speechSynthesis.speak(u);
+  log(label + ": asked to speak" + (voice ? " with " + voice.name : " with default voice"));
+  setTimeout(() => { if (!started) log(label + ": NOT started after 5 seconds (speaking=" + speechSynthesis.speaking + ", paused=" + speechSynthesis.paused + ")"); }, 5000);
+}
+document.getElementById("t1").onclick = () => say("Test 1", "This is test one. You should hear this sentence.", null, null);
+document.getElementById("t2").onclick = () => { load(); const v = pickEn(); if (!v) { log("Test 2: no English voice found"); return; } say("Test 2", "This is test two, with the voice the app picks.", v); };
+document.getElementById("t3").onclick = () => {
+  load();
+  if (has) { try { const w = new SpeechSynthesisUtterance("Starting"); w.volume = 0.01; keep.push(w); speechSynthesis.speak(w); } catch (e) {} }
+  const a = new Audio("audio/recitation/112002.mp3");
+  a.onplay = () => log("Test 3: clip playing");
+  a.onended = () => { log("Test 3: clip ended, now the voice"); say("Test 3", "This is test three. The voice after the recitation clip.", pickEn()); };
+  a.onerror = () => log("Test 3: clip could not play");
+  a.play().catch(e => log("Test 3: clip blocked: " + e.name));
+};
+document.getElementById("t4").onclick = () => { load(); const v = pickUr(); if (!v) { log("Test 4: no Urdu voice on this device"); return; } say("Test 4", "یہ آواز کا امتحان ہے", v); };
+if (has) { load(); try { speechSynthesis.addEventListener("voiceschanged", load); } catch (e) {} setTimeout(load, 1000); setTimeout(load, 3000); }
+else info();
+</script>
+</body></html>

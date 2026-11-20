@@ -356,8 +356,8 @@ function wakeOff() { try { if (wl) wl.release(); } catch (e) {} wl = null; }
 document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && P.playing) wakeOn(); });
 
 function unlock() {
-  // Called inside the tap, so later clips and voices may start without another tap.
-  if (VOICES.has) { try { const w = new SpeechSynthesisUtterance(" "); w.volume = 0; speechSynthesis.speak(w); } catch (e) {} }
+  // Called inside the tap, so later clips may start without another tap.
+  try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
   if (!P.unlocked) { P.unlocked = true; try { A.muted = true; A.src = "audio/recitation/112002.mp3"; const pr = A.play(); if (pr) pr.then(() => { A.pause(); A.muted = false; }).catch(() => { A.muted = false; }); else A.muted = false; } catch (e) { A.muted = false; } }
 }
 function halt() {
@@ -369,6 +369,8 @@ function halt() {
 function start(steps, mode) {
   halt();
   if (!steps.length) { toast("Nothing to play. Turn on at least one audio part."); return; }
+  // Still inside the tap: speak once now so iPhone Safari allows the device voice later without a tap.
+  if (VOICES.has && steps.some(s => s.text)) { try { speechSynthesis.resume(); const w = new SpeechSynthesisUtterance("Starting"); const v = VOICES.en || VOICES.ur; if (v) { w.voice = v; w.lang = v.lang; } w.volume = 0.01; P.warm = w; speechSynthesis.speak(w); } catch (e) {} }
   P.steps = steps; P.i = 0; P.playing = true; P.paused = false; P.mode = mode; P.surah = S.q.surah;
   document.body.classList.add("playing");
   wakeOn(); mediaSession();
@@ -396,11 +398,34 @@ function speakNext(tok) {
   const s = P.steps[P.i];
   const v = VOICES[s.lang];
   if (P.ci >= P.ch.length || !v) { advance(); return; }
+  sayChunk(tok, v, true);
+}
+/* Speak one chunk. If the voice has not started after 5 seconds, try once more with the plain
+   English language setting (English only), then skip the tafsir so the sequence never gets stuck. */
+function sayChunk(tok, v, withVoice) {
+  const s = P.steps[P.i];
   const u = new SpeechSynthesisUtterance(P.ch[P.ci]);
-  u.voice = v; u.lang = v.lang; u.rate = 1;
-  u.onend = () => { if (tok !== P.tok || P.paused) return; P.ci++; speakNext(tok); };
-  u.onerror = (e) => { if (tok !== P.tok || P.paused) return; if (e && (e.error === "interrupted" || e.error === "canceled")) return; P.ci++; speakNext(tok); };
+  if (withVoice) { u.voice = v; u.lang = v.lang; } else { u.lang = "en-US"; }
+  u.rate = 1;
+  let began = false;
+  u.onstart = () => { began = true; };
+  u.onend = () => { if (tok !== P.tok || P.paused) return; began = true; P.ci++; speakNext(tok); };
+  u.onerror = (e) => { if (tok !== P.tok || P.paused) return; if (e && (e.error === "interrupted" || e.error === "canceled")) return; began = true; P.ci++; speakNext(tok); };
+  P.u = u; // keep a reference, or the browser may drop it before it ends
+  try { speechSynthesis.resume(); } catch (e) {}
   speechSynthesis.speak(u);
+  const ciAt = P.ci;
+  // If the voice starts but never reports that it ended, move on after 45 seconds.
+  setTimeout(() => { if (tok === P.tok && !P.paused && P.u === u && P.ci === ciAt) { try { speechSynthesis.cancel(); } catch (e) {} P.ci++; speakNext(tok); } }, 45000);
+  clearTimeout(P.dog);
+  P.dog = setTimeout(() => {
+    if (tok !== P.tok || P.paused || began || speechSynthesis.speaking) return;
+    try { speechSynthesis.cancel(); } catch (e) {}
+    if (withVoice && s.lang === "en") { setTimeout(() => sayChunk(tok, v, false), 100); return; }
+    toast("The device voice did not start, so the " + (s.lang === "en" ? "English" : "Urdu") + " tafsir was skipped.");
+    P.voiceFailed = true;
+    advance();
+  }, 5000);
 }
 function advance() { P.i++; if (P.i >= P.steps.length) finish(); else runStep(); }
 function finish() { stop(); toast("Finished."); }
