@@ -358,29 +358,57 @@ document.addEventListener("visibilitychange", () => { if (document.visibilitySta
 function unlock() {
   // Called inside the tap, so later clips may start without another tap.
   try { if (navigator.audioSession) navigator.audioSession.type = "playback"; } catch (e) {}
-  if (!P.unlocked) { P.unlocked = true; try { A.muted = true; A.src = "audio/recitation/112002.mp3"; const pr = A.play(); if (pr) pr.then(() => { A.pause(); A.muted = false; }).catch(() => { A.muted = false; }); else A.muted = false; } catch (e) { A.muted = false; } }
+  if (!P.unlocked) {
+    P.unlocked = true;
+    const UNLOCK = "audio/recitation/112002.mp3";
+    // Only stop the silent unlock clip, never a real clip that has started in the meantime.
+    const done = () => { if (A.muted && A.src.endsWith(UNLOCK)) { ourPause(); A.muted = false; } };
+    try { A.muted = true; A.src = UNLOCK; const pr = A.play(); if (pr) pr.then(done).catch(() => { if (A.src.endsWith(UNLOCK)) A.muted = false; }); else A.muted = false; } catch (e) { A.muted = false; }
+  }
 }
+/* iPhone Safari may pause the audio by itself (for example when the device voice starts).
+   If the app did not ask for that pause, start the clip again, up to 3 times per clip. */
+A.addEventListener("pause", () => {
+  if (A.ours) { A.ours = false; return; }
+  if (!P.playing || P.paused || A.ended) return;
+  const s = P.steps[P.i];
+  if (!s || !s.src) return;
+  P.audioRetry = (P.audioRetry || 0) + 1;
+  if (P.audioRetry > 3) { P.paused = true; updateBar("Tap Resume to continue."); return; }
+  setTimeout(() => { if (P.playing && !P.paused && P.steps[P.i] === s && A.paused && !A.ended) { const pr = A.play(); if (pr) pr.catch(() => { P.paused = true; updateBar("Tap Resume to continue."); }); } }, 400);
+});
+function ourPause() { if (!A.paused) { A.ours = true; try { A.pause(); } catch (e) { A.ours = false; } } }
 function halt() {
   P.tok++;
   A.onended = null; A.onerror = null;
-  try { A.pause(); } catch (e) {}
+  ourPause();
   if (VOICES.has) { try { speechSynthesis.cancel(); } catch (e) {} }
 }
 function start(steps, mode) {
   halt();
   if (!steps.length) { toast("Nothing to play. Turn on at least one audio part."); return; }
   // Still inside the tap: speak once now so iPhone Safari allows the device voice later without a tap.
-  if (VOICES.has && steps.some(s => s.text)) { try { speechSynthesis.resume(); const w = new SpeechSynthesisUtterance("Starting"); const v = VOICES.en || VOICES.ur; if (v) { w.voice = v; w.lang = v.lang; } w.volume = 0.01; P.warm = w; speechSynthesis.speak(w); } catch (e) {} }
+  // The first clip waits until this has finished, so the two never overlap.
+  let go = () => { go = () => {}; runStep(); };
+  if (VOICES.has && steps.some(s => s.text)) {
+    try {
+      speechSynthesis.resume();
+      const w = new SpeechSynthesisUtterance("Starting"); const v = VOICES.en || VOICES.ur;
+      if (v) { w.voice = v; w.lang = v.lang; }
+      w.volume = 0.01; w.onend = () => setTimeout(() => go(), 250); w.onerror = () => go();
+      P.warm = w; speechSynthesis.speak(w);
+      setTimeout(() => go(), 2000);
+    } catch (e) { setTimeout(() => go(), 120); }
+  } else setTimeout(() => go(), 120);
   P.steps = steps; P.i = 0; P.playing = true; P.paused = false; P.mode = mode; P.surah = S.q.surah;
   document.body.classList.add("playing");
   wakeOn(); mediaSession();
-  setTimeout(runStep, 120);
 }
 function runStep() {
   const tok = ++P.tok;
   const s = P.steps[P.i];
   if (!s) { finish(); return; }
-  P.paused = false; showNow(s, true);
+  P.paused = false; P.audioRetry = 0; P.speechRetry = 0; showNow(s, true);
   if (s.src) {
     A.muted = false;
     A.onended = () => { if (tok === P.tok) advance(); };
@@ -409,17 +437,28 @@ function sayChunk(tok, v, withVoice) {
   u.rate = 1;
   let began = false;
   u.onstart = () => { began = true; };
-  u.onend = () => { if (tok !== P.tok || P.paused) return; began = true; P.ci++; speakNext(tok); };
-  u.onerror = (e) => { if (tok !== P.tok || P.paused) return; if (e && (e.error === "interrupted" || e.error === "canceled")) return; began = true; P.ci++; speakNext(tok); };
+  u.onend = () => { if (tok !== P.tok || P.paused || P.u !== u) return; began = true; P.speechRetry = 0; P.ci++; speakNext(tok); };
+  u.onerror = (e) => {
+    if (tok !== P.tok || P.paused || P.u !== u) return;
+    began = true;
+    if (e && (e.error === "interrupted" || e.error === "canceled")) {
+      if (P.ourCancel) { P.ourCancel = false; return; }
+      // Cut off by the phone, not by the app: say this part again (up to 2 times), then move on.
+      P.speechRetry = (P.speechRetry || 0) + 1;
+      if (P.speechRetry <= 2) { setTimeout(() => speakNext(tok), 300); return; }
+    }
+    P.speechRetry = 0; P.ci++; speakNext(tok);
+  };
   P.u = u; // keep a reference, or the browser may drop it before it ends
   try { speechSynthesis.resume(); } catch (e) {}
   speechSynthesis.speak(u);
   const ciAt = P.ci;
   // If the voice starts but never reports that it ended, move on after 45 seconds.
-  setTimeout(() => { if (tok === P.tok && !P.paused && P.u === u && P.ci === ciAt) { try { speechSynthesis.cancel(); } catch (e) {} P.ci++; speakNext(tok); } }, 45000);
+  setTimeout(() => { if (tok === P.tok && !P.paused && P.u === u && P.ci === ciAt) { P.ourCancel = true; P.u = null; try { speechSynthesis.cancel(); } catch (e) {} P.ci++; speakNext(tok); } }, 45000);
   clearTimeout(P.dog);
   P.dog = setTimeout(() => {
-    if (tok !== P.tok || P.paused || began || speechSynthesis.speaking) return;
+    if (tok !== P.tok || P.paused || began || speechSynthesis.speaking || P.u !== u) return;
+    P.ourCancel = true; P.u = null;
     try { speechSynthesis.cancel(); } catch (e) {}
     if (withVoice && s.lang === "en") { setTimeout(() => sayChunk(tok, v, false), 100); return; }
     toast("The device voice did not start, so the " + (s.lang === "en" ? "English" : "Urdu") + " tafsir was skipped.");
@@ -440,7 +479,7 @@ function pause() {
   if (!P.playing || P.paused) return;
   const s = P.steps[P.i];
   P.paused = true;
-  if (s.src) { try { A.pause(); } catch (e) {} }
+  if (s.src) ourPause();
   else { P.tok++; try { speechSynthesis.cancel(); } catch (e) {} }
   updateBar();
 }
@@ -508,7 +547,9 @@ function updateBar(msg) {
 function mediaSession() {
   if (mediaSession.done || !navigator.mediaSession) return;
   mediaSession.done = true;
-  const h = { play: resume, pause: pause, stop: stop, nexttrack: () => jump(1), previoustrack: () => jump(-1) };
+  // No play or pause handlers: iPhone Safari sends "pause" by itself when the device voice starts,
+  // which used to pause the app. Pause and Resume are on the app's own buttons.
+  const h = { nexttrack: () => jump(1), previoustrack: () => jump(-1) };
   for (const k in h) { try { navigator.mediaSession.setActionHandler(k, h[k]); } catch (e) {} }
 }
 $("#pPause").onclick = () => (P.paused ? resume() : pause());
