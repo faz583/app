@@ -113,6 +113,7 @@ button:focus-visible, a:focus-visible, input:focus-visible + span { outline: 3px
       <button class="tab" data-view="today" aria-pressed="true">Today</button>
       <button class="tab" data-view="topics" aria-pressed="false">Topics</button>
       <button class="tab" data-view="quran" aria-pressed="false">Quran</button>
+      <button class="tab" data-view="stories" aria-pressed="false">Stories</button>
       <button class="tab" data-view="saved" aria-pressed="false">Saved</button>
     </nav>
   </header>
@@ -183,7 +184,7 @@ function pick(h, seed, setNo) {
 /* ---------- views ---------- */
 let view = "today", openTopic = null, busy = false;
 function toast(msg) { const t = $("#toast"); t.textContent = msg; t.hidden = false; clearTimeout(toast.t); toast.t = setTimeout(() => t.hidden = true, 3000); }
-function setView(v) { view = v; if (v !== "topics") openTopic = null; document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v))); render(); window.scrollTo(0, 0); }
+function setView(v) { if (view === "stories" && v !== "stories" && window.Stories) window.Stories.leave(); view = v; if (v !== "topics") openTopic = null; document.querySelectorAll(".tab").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.view === v))); render(); window.scrollTo(0, 0); }
 function isSaved(h) { return S.saved.some(x => x.url === h.url); }
 function gradeHTML(h) {
   if (!h.g.length) return `<div class="grade"><b>Sahih.</b> From ${esc(h.bn)}, one of the two Sahih collections.</div>`;
@@ -656,9 +657,18 @@ function copyText(t) {
   fallback();
 }
 
+/* Stories tab: its code loads only when the tab is opened (stories/stories.js). */
+let storiesJs = null;
+function showStories(v) {
+  if (window.Stories) { window.Stories.render(v); return; }
+  v.innerHTML = `<section class="card"><p class="note">Loading the stories.</p></section>`;
+  if (!storiesJs) storiesJs = new Promise((ok, no) => { const s = document.createElement("script"); s.src = "stories/stories.js"; s.onload = ok; s.onerror = () => { storiesJs = null; no(); }; document.head.appendChild(s); });
+  storiesJs.then(() => { if (view === "stories") window.Stories.render(v); }).catch(() => { v.innerHTML = `<section class="card"><p>The stories could not be loaded. Check your connection, then open the tab again.</p></section>`; });
+}
 function render() {
   const v = $("#view");
   if (view === "quran") { v.innerHTML = quranHTML(); bindQuran(v); if (!QD && !qErr) loadQuran(); return; }
+  if (view === "stories") { showStories(v); return; }
   if (loadErr) { v.innerHTML = `<section class="card"><p>${esc(loadErr)}</p><div class="row"><button class="btn primary" id="retry">Try again</button></div></section>`; $("#retry").onclick = boot; return; }
   if (!TOPICS) return;
   if (view === "today") { const t = topicOfDay(); v.innerHTML = topicHTML(t, true); need(t.id); }
